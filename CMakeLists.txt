@@ -14,10 +14,8 @@ target_compile_options(pulse PRIVATE -Wall -Wextra -pedantic)
 
 # Link pthread for std::thread support & JSON
 find_package(Threads REQUIRED)
-find_package(nlohmann_json 3.2.0 REQUIRED)
 
 target_link_libraries(pulse
     PUBLIC
         Threads::Threads
-        nlohmann_json::nlohmann_json
 )

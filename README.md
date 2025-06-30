@@ -1,4 +1,9 @@
-# Pulse – Peer-to-Peer Path Reservation Service
+<table align="center">
+  <tr>
+    <td><img src=".github/assets/logo.png" alt="Socks Logo" width="80"></td>
+    <td><h1 style="margin: 0;">Pulse: Peer-to-Peer Path Reservation Service</h1></td>
+  </tr>
+</table>
 
 **Pulse** is a tiny, UDP-based coordinator that lets two robots safely reserve and traverse shared “nodes” in a map without collision. It works by exchanging periodic **heartbeat** messages carrying:
 

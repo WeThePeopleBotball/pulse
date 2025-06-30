@@ -13,7 +13,7 @@ namespace pulse {
 
 using NodeID = std::string;
 using Path = std::vector<NodeID>;
-using AcceptCallback = std::function<void(const Path &path)>;
+using OnConflictCallback = std::function<void(const Path &path)>;
 
 enum class Mode { IDLE, PROPOSAL, EXECUTION };
 
@@ -92,11 +92,11 @@ class Pulse {
     void abort_execution();
 
     /**
-     * @brief Callback to call on accepted proposal in IDLE mode
+     * @brief Callback to call on accepted proposal with conflict in IDLE mode
      *
      * @param cb Callback to call
      */
-    void set_accept_callback(AcceptCallback cb);
+    void set_on_idle_conflict_callback(OnConflictCallback cb);
 
     /**
      * @brief Get the peer node
@@ -129,7 +129,7 @@ class Pulse {
     // Networking
     int sockfd_;                   ///< UDP socket file descriptor
     struct sockaddr_in peer_addr_; ///< Peer address struct
-    AcceptCallback accept_callback_;
+    OnConflictCallback on_idle_conflict_callback_;
 
     // Local & peer state
     NodeID current_node_; ///< Last known own node

@@ -212,20 +212,31 @@ void Pulse::handle_heartbeat_(const nlohmann::json &msg) {
         peer_prop_.token = p.value("token", 0U);
         peer_prop_.path = p.value("path", Path());
 
+        Path local_path_incl = Path(local_path_.begin(), local_path_.end());
+        local_path_incl.push_back(current_node_);
+
+        Path peer_path_incl =
+            Path(peer_prop_.path.begin(), peer_prop_.path.end());
+        peer_path_incl.push_back(peer_node_);
+
         // Decide response based on our current mode
         if (mode_ == Mode::IDLE) {
+            bool conflict = paths_conflict(local_path_incl, peer_path_incl);
             pending_response_is_ack_ = true;
             peer_path_ = peer_prop_.path;
-            std::thread([&]() { accept_callback_(peer_path_); }).detach();
+            if (conflict)
+                std::thread([&]() {
+                    on_idle_conflict_callback_(peer_path_);
+                }).detach();
         } else if (mode_ == Mode::EXECUTION) {
-            bool conflict = paths_conflict(local_path_, peer_prop_.path);
+            bool conflict = paths_conflict(local_path_incl, peer_path_incl);
             pending_response_is_ack_ = !conflict;
             if (pending_response_is_ack_) {
                 peer_path_ = peer_prop_.path;
             }
         } else if (mode_ == Mode::PROPOSAL) {
             // Both in proposal
-            if (paths_conflict(local_path_, peer_prop_.path)) {
+            if (paths_conflict(local_path_incl, peer_path_incl)) {
                 // Conflicting path: break ties via token & robot_id
                 if ((token_ > peer_prop_.token) ||
                     (token_ == peer_prop_.token && robot_id_ > peer_id)) {
@@ -268,8 +279,8 @@ void Pulse::handle_heartbeat_(const nlohmann::json &msg) {
     }
 }
 
-void Pulse::set_accept_callback(AcceptCallback cb) {
-    this->accept_callback_ = cb;
+void Pulse::set_on_idle_conflict_callback(OnConflictCallback cb) {
+    this->on_idle_conflict_callback_ = cb;
 }
 
 NodeID Pulse::get_peer_node() const { return this->peer_node_; }

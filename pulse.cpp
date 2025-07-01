@@ -35,17 +35,20 @@ Mode mode_from_string(const std::string &s) {
 
 // Helper: check if two paths share any node
 static bool paths_conflict(const Path &a, const Path &b) {
-    std::unordered_set<NodeID> nodes(a.begin(), a.end());
-    for (const auto &n : b) {
+    const Path *larger = (a.size() > b.size() ? &a : &b);
+    const Path *smaller = (a.size() < b.size() ? &a : &b);
+    std::unordered_set<NodeID> nodes(larger->begin(), larger->end());
+    for (const auto &n : *smaller) {
         if (nodes.count(n))
             return true;
     }
     return false;
 }
 
-Pulse::Pulse(int robot_id, int hb_interval_ms, int proposal_timeout_ms,
-             int local_port, const Endpoint &peer)
+Pulse::Pulse(int robot_id, int hb_interval_ms, int general_timeout_ms,
+             int proposal_timeout_ms, int local_port, const Endpoint &peer)
     : robot_id_(robot_id), hb_interval_ms_(hb_interval_ms),
+      general_timeout_ms_(general_timeout_ms),
       proposal_timeout_ms_(proposal_timeout_ms), local_port_(local_port),
       peer_(peer), mode_(Mode::IDLE), token_(0),
       awaiting_response_received_(false), awaiting_response_is_ack_(false),
@@ -68,6 +71,16 @@ Pulse::Pulse(int robot_id, int hb_interval_ms, int proposal_timeout_ms,
         close(sockfd_);
         throw std::runtime_error("Failed to bind socket");
     }
+    // Set timeout for receiver
+    struct timeval tv;
+    tv.tv_sec = general_timeout_ms_ / 1000;
+    tv.tv_usec = (general_timeout_ms_ % 1000) * 1000;
+    if (setsockopt(sockfd_, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv,
+                   sizeof(tv)) < 0) {
+        perror("setsockopt");
+        close(sockfd_);
+        throw std::runtime_error("Failed to set socket timeout");
+    }
     // setup peer address
     std::memset(&peer_addr_, 0, sizeof(peer_addr_));
     peer_addr_.sin_family = AF_INET;
@@ -79,7 +92,8 @@ Pulse::~Pulse() { stop(); }
 
 void Pulse::run() {
     stop_flag_.store(false);
-    // Heartbeat sender thread
+    std::exception_ptr recv_exception = nullptr;
+
     thread_send_ = std::thread([this]() {
         while (!stop_flag_.load()) {
             send_heartbeat_();
@@ -87,25 +101,46 @@ void Pulse::run() {
                 std::chrono::milliseconds(hb_interval_ms_));
         }
     });
-    // Receiver thread
-    thread_recv_ = std::thread([this]() {
-        char buf[4096];
-        while (!stop_flag_.load()) {
-            ssize_t len = recv(sockfd_, buf, sizeof(buf) - 1, 0);
-            if (len > 0) {
-                buf[len] = '\0';
-                try {
-                    auto msg = nlohmann::json::parse(buf);
-                    handle_heartbeat_(msg);
-                } catch (const std::exception &e) {
-                    std::cerr << "JSON parse error: " << e.what() << std::endl;
+
+    thread_recv_ = std::thread([this, &recv_exception]() {
+        try {
+            char buf[4096];
+            while (!stop_flag_.load()) {
+                ssize_t len = recv(sockfd_, buf, sizeof(buf) - 1, 0);
+                if (len > 0) {
+                    buf[len] = '\0';
+                    try {
+                        auto msg = nlohmann::json::parse(buf);
+                        handle_heartbeat_(msg);
+                    } catch (const std::exception &e) {
+                        std::cerr << "JSON parse error: " << e.what()
+                                  << std::endl;
+                    }
+                } else {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        throw std::runtime_error("UDP receive timeout");
+                    } else if (errno == EINTR || errno == EBADF) {
+                        // Graceful shutdown
+                        break;
+                    } else {
+                        throw std::runtime_error("UDP socket error: " +
+                                                 std::string(strerror(errno)));
+                    }
                 }
             }
+        } catch (...) {
+            recv_exception = std::current_exception();
+            stop();
         }
     });
-    // Block until threads finish
+
+    // Wait for both threads
     thread_recv_.join();
     thread_send_.join();
+
+    // Rethrow if receiver failed
+    if (recv_exception)
+        std::rethrow_exception(recv_exception);
 }
 
 void Pulse::stop() {
@@ -221,13 +256,13 @@ void Pulse::handle_heartbeat_(const nlohmann::json &msg) {
 
         // Decide response based on our current mode
         if (mode_ == Mode::IDLE) {
-            bool conflict = paths_conflict(local_path_incl, peer_path_incl);
             pending_response_is_ack_ = true;
             peer_path_ = peer_prop_.path;
-            if (conflict)
+            if (paths_conflict({current_node_}, peer_path_incl)) {
                 std::thread([&]() {
-                    on_idle_conflict_callback_(peer_path_);
+                    on_lose_conflict_callback_(peer_path_incl);
                 }).detach();
+            }
         } else if (mode_ == Mode::EXECUTION) {
             bool conflict = paths_conflict(local_path_incl, peer_path_incl);
             pending_response_is_ack_ = !conflict;
@@ -249,6 +284,11 @@ void Pulse::handle_heartbeat_(const nlohmann::json &msg) {
                     peer_path_ = peer_prop_.path;
                     awaiting_response_is_ack_ = false;
                     pending_response_is_ack_ = true;
+                    if (paths_conflict({current_node_}, peer_path_incl)) {
+                        std::thread([&]() {
+                            on_lose_conflict_callback_(peer_path_incl);
+                        }).detach();
+                    }
                 }
             } else {
                 // NO CONFLICT - EVERYONE WINS
@@ -279,8 +319,8 @@ void Pulse::handle_heartbeat_(const nlohmann::json &msg) {
     }
 }
 
-void Pulse::set_on_idle_conflict_callback(OnConflictCallback cb) {
-    this->on_idle_conflict_callback_ = cb;
+void Pulse::set_on_lose_conflict_callback(OnConflictCallback cb) {
+    this->on_lose_conflict_callback_ = cb;
 }
 
 NodeID Pulse::get_peer_node() const { return this->peer_node_; }

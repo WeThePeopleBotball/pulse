@@ -42,14 +42,15 @@ class Pulse {
      * @brief Construct a Pulse coordinator.
      * @param robot_id            Unique integer ID for this robot.
      * @param hb_interval_ms      Heartbeat interval in milliseconds.
+     * @param general_timeout_ms  Timeout for receiving thread
      * @param proposal_timeout_ms Timeout for each proposal round in
      * milliseconds.
      * @param local_port          UDP port to bind for sending/receiving
      * heartbeats.
      * @param peer                Endpoint of the peer robot.
      */
-    Pulse(int robot_id, int hb_interval_ms, int proposal_timeout_ms,
-          int local_port, const Endpoint &peer);
+    Pulse(int robot_id, int hb_interval_ms, int general_timeout_ms,
+          int proposal_timeout_ms, int local_port, const Endpoint &peer);
 
     /**
      * @brief Destructor; stops networking threads if running.
@@ -92,11 +93,12 @@ class Pulse {
     void abort_execution();
 
     /**
-     * @brief Callback to call on accepted proposal with conflict in IDLE mode
+     * @brief Callback to call on accepted proposal with conflict in IDLE or
+     * PROPOSAL mode
      *
      * @param cb Callback to call
      */
-    void set_on_idle_conflict_callback(OnConflictCallback cb);
+    void set_on_lose_conflict_callback(OnConflictCallback cb);
 
     /**
      * @brief Get the peer node
@@ -120,6 +122,7 @@ class Pulse {
   private:
     int robot_id_;
     int hb_interval_ms_;
+    int general_timeout_ms_;
     int proposal_timeout_ms_;
     int local_port_;
     Endpoint peer_;
@@ -129,7 +132,7 @@ class Pulse {
     // Networking
     int sockfd_;                   ///< UDP socket file descriptor
     struct sockaddr_in peer_addr_; ///< Peer address struct
-    OnConflictCallback on_idle_conflict_callback_;
+    OnConflictCallback on_lose_conflict_callback_;
 
     // Local & peer state
     NodeID current_node_; ///< Last known own node

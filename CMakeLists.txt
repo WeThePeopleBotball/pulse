@@ -6,8 +6,7 @@ add_library(pulse STATIC
     pulse.cpp
 )
 
-# Public include directory for clients
-target_include_directories(pulse PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(pulse PUBLIC ${JSON_LIB})
 
 # Compiler warnings
 target_compile_options(pulse PRIVATE -Wall -Wextra -pedantic)

@@ -5,6 +5,7 @@
 #include <mutex>
 #include <netinet/in.h>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
